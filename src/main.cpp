@@ -1,6 +1,8 @@
 #include "nvim/nvim.h"
 #include "renderer/renderer.h"
 
+#define WM_NOTIFY_INSTANCE (WM_USER + 100)
+
 struct Context {
 	bool start_maximized;
 	bool start_fullscreen;
@@ -22,6 +24,7 @@ struct Context {
 	uint32_t cursor_timer_id;
 	uint32_t cursor_timeout_in_ms;
 	HKL hkl;
+    HANDLE shared_memory_with_filepath;
 };
 
 void ToggleFullscreen(HWND hwnd, Context *context) {
@@ -373,6 +376,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 	case WM_CLOSE: { 
 		NvimQuit(context->nvim);
 	} return 0;
+    case WM_NOTIFY_INSTANCE: {
+        if (void* buffer = MapViewOfFile(context->shared_memory_with_filepath, FILE_MAP_READ, 0, 0, 0))
+        {
+            NvimOpenFile(context->nvim, (PWSTR)(buffer), false);
+			UnmapViewOfFile(buffer);
+        }
+	} return 0;
 	}
 
 	return DefWindowProc(hwnd, msg, wparam, lparam);
@@ -392,15 +402,45 @@ BOOL ShouldUseDarkMode()
 	return false;
 }
 
+BOOL NotifyMainInstance(HANDLE shared_memory, DWORD shared_memory_size, const wchar_t* filepath)
+{
+    HWND hWnd = FindWindow(nullptr, L"Nvy");
+    if (!hWnd)
+    {
+        MessageBox(nullptr, L"ERROR: Failed to locate main instance window", L"Nvy", MB_OK | MB_ICONERROR);
+        return FALSE;
+    }
+
+    void* buffer = MapViewOfFile(shared_memory, FILE_MAP_WRITE, 0, 0, 0);
+    if (!buffer)
+    {
+        MessageBox(nullptr, L"ERROR: Failed to map shared memory", L"Nvy", MB_OK | MB_ICONERROR);
+        return FALSE;
+    }
+
+    wcscpy_s((PWSTR)buffer, shared_memory_size - 1, filepath);
+    UnmapViewOfFile(buffer);
+
+    PostMessage(hWnd, WM_NOTIFY_INSTANCE, 0, 0);
+    ShowWindow(hWnd, SW_NORMAL);
+    SetForegroundWindow(hWnd);
+    return TRUE;
+}
+
 int WINAPI wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev_instance, _In_ LPWSTR p_cmd_line, _In_ int n_cmd_show) {
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE);
 
-	int n_args;
+	DWORD shared_memory_size = 1 << 12;
+    HANDLE shared_memory_with_filepath = ::CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, shared_memory_size, "NvySharedMemoryWithFilepath");
+    BOOL another_instance_already_exists = ::GetLastError() == ERROR_ALREADY_EXISTS;
+
+    int n_args;
 	LPWSTR *cmd_line_args = CommandLineToArgvW(GetCommandLineW(), &n_args);
 	bool start_maximized = false;
 	bool start_fullscreen = false;
 	bool disable_ligatures = false;
-  bool disable_fullscreen = false;
+	bool disable_fullscreen = false;
+    bool reuse_window = false;
 	float linespace_factor = 1.0f;
 	int64_t start_rows = 0;
 	int64_t start_cols = 0;
@@ -443,6 +483,10 @@ int WINAPI wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev_instance, _
 		else if(!wcscmp(cmd_line_args[i], L"--disable-fullscreen")) {
 			disable_fullscreen = true;
 		}
+        else if (!wcscmp(cmd_line_args[i], L"--reuse-window"))
+        {
+            reuse_window = true;
+        }
 		else if(!wcsncmp(cmd_line_args[i], L"--geometry=", wcslen(L"--geometry="))) {
 			wchar_t *end_ptr;
 			start_cols = wcstol(&cmd_line_args[i][11], &end_ptr, 10);
@@ -475,7 +519,13 @@ int WINAPI wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev_instance, _
 				MessageBoxA(NULL, "ERROR: File path too long", "Nvy", MB_OK | MB_ICONERROR);
 				return 1;
 			}
-			size_t tmp_len = sizeof(wchar_t) * (nvim_cmd_len + arg_len + 4);
+
+            if (another_instance_already_exists && reuse_window && NotifyMainInstance(shared_memory_with_filepath, shared_memory_size, cmd_line_args[i])) {
+				// We've successfully notifed the existing app instance to open this file. Just quit silently.
+                return 0;
+            }
+
+            size_t tmp_len = sizeof(wchar_t) * (nvim_cmd_len + arg_len + 4);
 			wchar_t *tmp = static_cast<wchar_t *>(realloc(nvim_cmd, tmp_len));
 			if (tmp) {
 				nvim_cmd = tmp;
@@ -520,7 +570,8 @@ int WINAPI wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev_instance, _
 		.saved_window_placement = WINDOWPLACEMENT { .length = sizeof(WINDOWPLACEMENT) },
 		.enable_cursor_timeout = enable_cursor_timeout,
 		.cursor_timer_id = cursor_timer_id,
-		.cursor_timeout_in_ms = cursor_timeout_in_ms
+		.cursor_timeout_in_ms = cursor_timeout_in_ms,
+		.shared_memory_with_filepath = shared_memory_with_filepath
 	};
 
 	HWND hwnd = CreateWindowEx(
