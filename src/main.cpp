@@ -422,7 +422,10 @@ BOOL NotifyMainInstance(HANDLE shared_memory, DWORD shared_memory_size, const wc
     UnmapViewOfFile(buffer);
 
     PostMessage(hWnd, WM_NOTIFY_INSTANCE, 0, 0);
-    ShowWindow(hWnd, SW_NORMAL);
+	if (IsIconic(hWnd))
+    {
+		ShowWindow(hWnd, SW_SHOW);
+    }
     SetForegroundWindow(hWnd);
     return TRUE;
 }
@@ -431,8 +434,8 @@ int WINAPI wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev_instance, _
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE);
 
 	DWORD shared_memory_size = 1 << 12;
-    HANDLE shared_memory_with_filepath = ::CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, shared_memory_size, "NvySharedMemoryWithFilepath");
-    BOOL another_instance_already_exists = ::GetLastError() == ERROR_ALREADY_EXISTS;
+    HANDLE shared_memory_with_filepath = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, shared_memory_size, "NvySharedMemoryWithFilepath");
+    BOOL another_instance_already_exists = GetLastError() == ERROR_ALREADY_EXISTS;
 
     int n_args;
 	LPWSTR *cmd_line_args = CommandLineToArgvW(GetCommandLineW(), &n_args);
