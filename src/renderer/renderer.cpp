@@ -1139,7 +1139,7 @@ void RendererRedraw(Renderer *renderer, mpack_node_t params, bool start_maximize
 			if (UpdateGridSize(renderer, redraw_command_arr))
 			{
 				PixelSize size = RendererGridToPixelSize(renderer, renderer->grid_rows, renderer->grid_cols);
-				SetWindowPos(renderer->hwnd, HWND_TOP, 0, 0, size.width, size.height, SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
+				//SetWindowPos(renderer->hwnd, HWND_TOP, 0, 0, size.width, size.height, SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
 			}
 		}
 		if (MPackMatchString(redraw_command_name, "grid_clear")) {
@@ -1206,7 +1206,7 @@ PixelSize RendererGridToPixelSize(Renderer *renderer, int rows, int cols) {
 
 	// Adjust size to include title bar
 	RECT adjusted_rect = { 0, 0, requested_width, requested_height };
-	AdjustWindowRect(&adjusted_rect, WS_OVERLAPPEDWINDOW, false);
+	//AdjustWindowRect(&adjusted_rect, WS_OVERLAPPEDWINDOW, false);
 	return PixelSize {
 		.width = adjusted_rect.right - adjusted_rect.left,
 		.height = adjusted_rect.bottom - adjusted_rect.top
